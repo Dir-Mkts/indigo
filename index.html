@@ -3699,7 +3699,8 @@ function buildRec(r, H, A, evResults) {
     }
   } else {
     // Sin momios → max probabilidad multimarket (v2.5 behavior)
-    const b = r.bestAll;
+    // Fallback defensivo: usa bestAll si existe, si no r.best (1X2)
+    const b = r.bestAll || r.best;
     primary = pickNameFromKey(b.n);
     primaryProb = b.p;
   }
