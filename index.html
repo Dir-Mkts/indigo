@@ -3247,6 +3247,9 @@ async function enrichMatchCard(idx, m, code, ds, espnOdds, oddsEvents) {
       : { h: 0, d: 0, a: 0, line: 2.5 };
 
     const r = model(code, fH, fA, false, [], modelOdds);
+    // Calcular EV antes de crear la recomendación: buildRec() lo usa para elegir el pick.
+    const modelProbs = gridMarkets(r.grid);
+    const evResults = realOdds ? calculateEV(modelProbs, realOdds) : [];
     const rec = buildRec(r, fH, fA, evResults);
 
     // ── Trend badges ──
@@ -3328,8 +3331,6 @@ async function enrichMatchCard(idx, m, code, ds, espnOdds, oddsEvents) {
     el.style.borderTop = `3px solid ${ickColorRaw}`;
     const mixedWarn = (fH.count<5||fA.count<5) ? `<span style="color:var(--yellow);font-size:8px;font-family:var(--mono)" title="Datos insuficientes en UEFA; se usó forma de liga local">⚠ mixta</span>` : '';
     // ── EV vs real odds ──
-    const modelProbs = gridMarkets(r.grid);
-    const evResults = realOdds ? calculateEV(modelProbs, realOdds) : [];
     const evHtml = evResults.length
       ? formatEVBadges(evResults)
       : fairLine(rec.primaryProb);
