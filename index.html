@@ -1384,13 +1384,19 @@ function calculateEV(modelProbs, realOdds) {
 }
 
 // Format EV results as HTML for card display
-function formatEVBadges(evResults) {
+function formatEVBadges(evResults, ick = 0, marketDiverges = false) {
   if (!evResults || !evResults.length) return '';
   const best = evResults[0];
   if (best.ev <= -0.05) return `<span class="ev-badge ev-neg">Sin valor · ${best.book}</span>`;
-  const parts = evResults.filter(e => e.ev > 0.02).slice(0, 2).map(e => {
+  // No presentar edges extremos o incompatibles con ICK/divergencia como una apuesta.
+  const safe = !marketDiverges && ick >= 6 && best.ev >= 0.02 && best.ev <= 0.30;
+  if (!safe && best.ev > 0.01) {
+    const why = marketDiverges ? 'mercado diverge' : ick < 6 ? 'ICK bajo' : 'EV atípico';
+    return `<span class="ev-badge ev-neu">EV por verificar · ${why}</span>`;
+  }
+  const parts = evResults.filter(e => e.ev > 0.02 && e.ev <= 0.30).slice(0, 2).map(e => {
     const cls = e.ev > 0.05 ? 'ev-pos' : 'ev-neu';
-    return `<span class="ev-badge ${cls}">EV ${(e.ev*100).toFixed(1)}% · ${e.market} @${e.odds.toFixed(2)}</span>`;
+    return `<span class="ev-badge ${cls}">VALOR +${(e.ev*100).toFixed(1)}% · ${e.market} @${e.odds.toFixed(2)}</span>`;
   });
   return parts.join(' ');
 }
@@ -3332,7 +3338,7 @@ async function enrichMatchCard(idx, m, code, ds, espnOdds, oddsEvents) {
     const mixedWarn = (fH.count<5||fA.count<5) ? `<span style="color:var(--yellow);font-size:8px;font-family:var(--mono)" title="Datos insuficientes en UEFA; se usó forma de liga local">⚠ mixta</span>` : '';
     // ── EV vs real odds ──
     const evHtml = evResults.length
-      ? formatEVBadges(evResults)
+      ? formatEVBadges(evResults, r.ick, !!r.p56)
       : fairLine(rec.primaryProb);
     const valorHtml = r.ick >= 7.5 ? '<span class="valor-badge">⚡ VALOR</span>' : '';
     // Filtrar grid según tipo de pick para mostrar resultado probable compatible
@@ -3656,55 +3662,25 @@ function buildRec(r, H, A, evResults) {
   const hSF = Math.round((H.scoreFreq||0)*100);
   const aSF = Math.round((A.scoreFreq||0)*100);
 
-  // ── Pick principal: EV > probabilidad > 1X2 ──
-  // Jerarquía:
-  //   1. Si hay momios reales (evResults) y algún mercado tiene EV > 0 → pick por EV
-  //   2. Si hay momios pero ninguno es positivo → 1X2 más probable como orientación
-  //   3. Sin momios → max probabilidad entre todos los mercados (comportamiento v2.5)
-  let primary, primaryProb, primaryEV = null;
-
+  // ── Pronóstico principal del modelo: siempre 1X2 ──
   function pickNameFromKey(key) {
-    switch(key) {
-      case 'Local': case 'Home':     return `${H.name} gana`;
-      case 'Visitante': case 'Away': return `${A.name} gana`;
-      case 'Empate': case 'Draw':    return 'Empate';
-      case 'BTTS Sí': case 'BTTS Yes': return 'BTTS Sí';
-      default: return key; // "Over 2.5", "Under 2.5", etc.
-    }
+    if (key === 'Local' || key === 'Home') return `${H.name} gana`;
+    if (key === 'Visitante' || key === 'Away') return `${A.name} gana`;
+    if (key === 'Empate' || key === 'Draw') return 'Empate';
+    return key;
   }
-  function probFromKey(key) {
-    switch(key) {
-      case 'Local': case 'Home':     return r.pW;
-      case 'Visitante': case 'Away': return r.pL;
-      case 'Empate': case 'Draw':    return r.pD;
-      case 'BTTS Sí': case 'BTTS Yes': return r.pB;
-      case 'Over 2.5':  return r.pO;
-      case 'Under 2.5': return 1 - r.pO;
-      default: return 0.5;
-    }
-  }
-
-  const hasOdds = evResults && evResults.length > 0;
-  if (hasOdds) {
-    const positive = evResults.filter(e => e.ev > 0.01);
-    if (positive.length > 0) {
-      // Mejor EV positivo
-      const top = positive[0];
-      primary = pickNameFromKey(top.market);
-      primaryProb = top.prob;
-      primaryEV = top.ev;
-    } else {
-      // Odds disponibles pero ninguno tiene valor → orientación 1X2
-      primary = pickNameFromKey(r.best.n);
-      primaryProb = r.best.p;
-    }
-  } else {
-    // Sin momios → max probabilidad multimarket (v2.5 behavior)
-    // Fallback defensivo: usa bestAll si existe, si no r.best (1X2)
-    const b = r.bestAll || r.best;
-    primary = pickNameFromKey(b.n);
-    primaryProb = b.p;
-  }
+  // El encabezado comunica el escenario estadístico, no una apuesta.
+  // EV se muestra aparte y solo se considera accionable con sus propios filtros.
+  const primary = pickNameFromKey(r.best.n);
+  const primaryProb = r.best.p;
+  const hasOdds = Array.isArray(evResults) && evResults.length > 0;
+  const topEV = hasOdds ? evResults[0] : null;
+  // Un EV es accionable únicamente si el partido tiene confianza suficiente,
+  // no existe divergencia fuerte con mercado y el edge no es anormalmente alto.
+  // EV >30% suele indicar cuota desactualizada, matching incorrecto o descalibración.
+  const valuePick = topEV && topEV.ev >= 0.02 && topEV.ev <= 0.30 && r.ick >= 6 && !r.p56
+    ? topEV : null;
+  const primaryEV = valuePick ? valuePick.ev : null;
 
   // ── Razonamiento coherente con el pick ──
   const reasons = [];
@@ -3735,6 +3711,14 @@ function buildRec(r, H, A, evResults) {
   // Usa gridMarkets() para calcular probabilidades de combos directamente del grid.
   const gm = gridMarkets(r.grid);
   const tags = [];
+
+  // Señal de valor separada del pronóstico; nunca sustituye el encabezado 1X2.
+  if (valuePick) {
+    tags.push({label:`VALOR: ${valuePick.market} +${(valuePick.ev*100).toFixed(1)}% @${valuePick.odds.toFixed(2)}`, cls:'good'});
+  } else if (topEV && topEV.ev > 0.01 && (r.ick < 6 || r.p56 || topEV.ev > 0.30)) {
+    const why = r.p56 ? 'mercado diverge' : r.ick < 6 ? 'ICK bajo' : 'EV atípico';
+    tags.push({label:`EV no accionable · ${why}`, cls:'warn'});
+  }
 
   // Over/Under
   if (r.pO > 0.58)      tags.push({label:`Over 2.5 ✓`, cls:'good'});
