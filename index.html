@@ -3341,17 +3341,19 @@ async function enrichMatchCard(idx, m, code, ds, espnOdds, oddsEvents) {
       ? formatEVBadges(evResults, r.ick, !!r.p56)
       : fairLine(rec.primaryProb);
     const valorHtml = r.ick >= 7.5 ? '<span class="valor-badge">⚡ VALOR</span>' : '';
-    // Filtrar grid según tipo de pick para mostrar resultado probable compatible
+    // Filtrar grid según tipo de pick para mostrar un marcador compatible.
+    // Antes buscaba "local"/"visitante" en el texto; los picks reales contienen
+    // nombres de equipo ("Real Sociedad gana"), así que caía en el modal global.
     const pickTxt = rec.primary || '';
     let pickGrid = r.grid;
     const ouMatch = pickTxt.match(/(\d+\.?\d*)/);
     const ouLine = ouMatch ? parseFloat(ouMatch[1]) : 2.5;
-    if (/over/i.test(pickTxt))      pickGrid = r.grid.filter(s => s.h + s.a > ouLine);
+    if (/over/i.test(pickTxt))       pickGrid = r.grid.filter(s => s.h + s.a > ouLine);
     else if (/under/i.test(pickTxt)) pickGrid = r.grid.filter(s => s.h + s.a < ouLine);
-    else if (/local/i.test(pickTxt)) pickGrid = r.grid.filter(s => s.h > s.a);
+    else if (pickTxt === `${m.homeName} gana`) pickGrid = r.grid.filter(s => s.h > s.a);
+    else if (pickTxt === `${m.awayName} gana`) pickGrid = r.grid.filter(s => s.h < s.a);
     else if (/empate/i.test(pickTxt)) pickGrid = r.grid.filter(s => s.h === s.a);
-    else if (/visitante/i.test(pickTxt)) pickGrid = r.grid.filter(s => s.h < s.a);
-    else if (/btts/i.test(pickTxt)) pickGrid = r.grid.filter(s => s.h > 0 && s.a > 0);
+    else if (/btts/i.test(pickTxt))   pickGrid = r.grid.filter(s => s.h > 0 && s.a > 0);
     const bs = (pickGrid.length > 0 ? pickGrid : r.grid).reduce((a,b) => b.p > a.p ? b : a);
     const bsPct = (bs.p * 100).toFixed(1);
     const bsResult = bs.h > bs.a ? 'Local' : bs.h < bs.a ? 'Visitante' : 'Empate';
